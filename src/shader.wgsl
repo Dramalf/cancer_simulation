@@ -64,9 +64,13 @@ fn fs_main(@builtin(position) frag_coord : vec4 < f32>) -> @location(0) vec4 < f
     {
         return vec4 < f32 > (0.0, 1.0, 0.0, 1.0);
     }
-    else
+    else if(value>3u && value<9u)
     {
         return vec4 < f32 > (0.0, 0.0, 1.0, 1.0);
+    }else if(value>=9u){
+        return vec4 < f32 > (0.5+f32(value-9u)/11.0, 1.0, 1.0, 1.0);
+    }else{
+        return vec4 < f32 > (0.0, 0.0, 0.0, 1.0);
     }
 }
 
@@ -135,6 +139,14 @@ global_id : vec3u,
         grid_data[global_id.x] = 0u;
     }
 }
+
+//fn effect_to_kill_rate(effect: u32) -> f32 {
+  //   if effect > 9u {
+    //    return 0.1 + 0.9 * (f32(effect- 9u) / 11.0);
+    //} else {
+     //   return 0.1f;
+    //}
+//}
 
 fn count_wbc_neighbors(x : u32, y : u32) -> u32 {
     let neighbors = array<vec2u, 4 > (
@@ -218,4 +230,10 @@ fn mix2to3(p : vec2u) -> vec3u {
     //from https://stackoverflow.com/questions/12964279/whats-the-origin-of-this-glsl-rand-one-liner
 fn sinRand(co : vec2f) -> f32 {
     return fract(sin(dot(co.xy, vec2(12.9898, 78.233))) * 43758.5453);
+}
+
+fn pseudo_random(x: u32, y: u32, tick: u32) -> f32 {
+    let seed = x * 374761393 + y * 668265263 + tick * 982451653;
+    let hashed = seed ^ (seed >> 13);
+    return fract(sin(f32(hashed)) * 43758.5453);
 }
