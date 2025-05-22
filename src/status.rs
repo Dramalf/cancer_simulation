@@ -16,7 +16,7 @@ pub struct Status{
     pub ctt: usize,
 }
 
-pub fn status_calculate(data: &[u32]) -> Status {
+pub fn status_calculate(data: &Vec<u32>) -> Status {
     let total_cells = data.len();
     let cancer_cells = count_value(data, CellType::CancerCell as u32);
     let normal_cells = count_value(data, CellType::NormalCell as u32);

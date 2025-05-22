@@ -26,7 +26,12 @@ struct State {
     window: &'static Window, // 使用 'static lifetime
     compute_pipeline: wgpu::ComputePipeline,
     render_pipeline: wgpu::RenderPipeline,
-    grid_data_buffer: wgpu::Buffer,
+    cell_data_prev_buffer: wgpu::Buffer,
+    cell_data_curr_buffer: wgpu::Buffer,
+    wbc_data_prev_buffer: wgpu::Buffer,
+    wbc_data_curr_buffer: wgpu::Buffer,
+    ctt_data_prev_buffer: wgpu::Buffer,
+    ctt_data_curr_buffer: wgpu::Buffer,
     uniform_buffer: wgpu::Buffer,
     cell_params: CellParams,
     cell_params_buffer: wgpu::Buffer,
@@ -35,7 +40,7 @@ struct State {
     frame_count: u32,
     max_frames: u32,
     immune_level: u32,
-    grid_data: Vec<u32>,
+    cell_data_prev: Vec<u32>,
     updated_by_immune: bool,
     paused: bool,
     waiting_for_ctt_input: bool,  // 是否等待靶向药输入
@@ -96,40 +101,31 @@ impl State {
         surface.configure(&device, &config);
 
         // --- 网格数据 ---
-
-        let mut grid_data: Vec<u32> =
-            vec![0; (simulation_config.grid_width * simulation_config.grid_width) as usize];
         let mut cell_data_prev: Vec<u32> =
             vec![0; (simulation_config.grid_width * simulation_config.grid_width) as usize];
         init_cell_grid(
-            &mut grid_data, 
+            &mut cell_data_prev, 
             simulation_config.grid_width,
             simulation_config.init_cancer_rate,
             simulation_config.init_cancer_grid_width,
             simulation_config.init_cancer_grid_num,
         );
-        let buffer_desc = |label| wgpu::BufferDescriptor {
+        let buffer_desc = |label,size:u64| wgpu::BufferDescriptor {
             label: Some(label),
-            size: (simulation_config.grid_width * simulation_config.grid_width) as u64,
+            size: size,
             usage: wgpu::BufferUsages::STORAGE
                 | wgpu::BufferUsages::COPY_DST
                 | wgpu::BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         };
+        let grid_size = (simulation_config.grid_width * simulation_config.grid_width) as u64;
 
-        // let grid_data_buffer = device.create_buffer(&buffer_desc("Grid Data Buffer"));
-        let grid_data_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Grid Data Prev Buffer"),
-            contents: bytemuck::cast_slice(&grid_data),
-            usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_DST
-                | wgpu::BufferUsages::COPY_SRC,
-        });
-        let cell_data_curr_buffer = device.create_buffer(&buffer_desc("Cell Data Curr Buffer"));
-        let wbc_data_prev_buffer = device.create_buffer(&buffer_desc("Wbc Data Prev Buffer"));
-        let wbc_data_curr_buffer = device.create_buffer(&buffer_desc("Wbc Data Curr Buffer"));
-        let ctt_data_prev_buffer = device.create_buffer(&buffer_desc("Ctt Data Prev Buffer"));
-        let ctt_data_curr_buffer = device.create_buffer(&buffer_desc("Ctt Data Curr Buffer"));
+        let grid_data_buffer = device.create_buffer(&buffer_desc("Grid Data Buffer",grid_size*std::mem::size_of::<u32>() as u64));
+        let cell_data_curr_buffer = device.create_buffer(&buffer_desc("Cell Data Curr Buffer",grid_size*std::mem::size_of::<u32>() as u64));
+        let wbc_data_prev_buffer = device.create_buffer(&buffer_desc("Wbc Data Prev Buffer",grid_size*std::mem::size_of::<u32>() as u64));
+        let wbc_data_curr_buffer = device.create_buffer(&buffer_desc("Wbc Data Curr Buffer",grid_size*std::mem::size_of::<f32>() as u64));
+        let ctt_data_prev_buffer = device.create_buffer(&buffer_desc("Ctt Data Prev Buffer",grid_size*std::mem::size_of::<f32>() as u64));
+        let ctt_data_curr_buffer = device.create_buffer(&buffer_desc("Ctt Data Curr Buffer",grid_size*std::mem::size_of::<f32>() as u64));
         
         let cell_data_prev_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Cell Data Prev Buffer"),
@@ -381,7 +377,12 @@ impl State {
             size,
             render_pipeline,
             compute_pipeline,
-            grid_data_buffer,
+            cell_data_prev_buffer,
+            cell_data_curr_buffer,
+            wbc_data_prev_buffer,
+            wbc_data_curr_buffer,
+            ctt_data_prev_buffer,
+            ctt_data_curr_buffer,
             cell_params,
             uniform_buffer,
             cell_params_buffer,
@@ -390,7 +391,7 @@ impl State {
             frame_count: 0,
             max_frames: simulation_config.num_frames,
             immune_level: 1,
-            grid_data,
+            cell_data_prev,
             updated_by_immune: false,
             paused: false,
             waiting_for_ctt_input: false,
@@ -498,12 +499,6 @@ impl State {
     }
 
     fn update(&mut self) {
-     
-
-        // 后续可以在这里更新 grid_data_buffer 的内容
-        // 例如，每帧或根据某些逻辑修改 self.grid_data_u32，然后:
-        // self.queue.write_buffer(&self.grid_data_buffer, 0, bytemuck::cast_slice(&self.grid_data_u32_updated));
-
         self.cell_params.time_stamp += 1;
         self.queue.write_buffer(
             &self.cell_params_buffer,
@@ -512,24 +507,29 @@ impl State {
         );
         if self.updated_by_immune {
             self.queue.write_buffer(
-                &self.grid_data_buffer,
+                &self.cell_data_prev_buffer,
                 0,
-                bytemuck::cast_slice(&self.grid_data),
+                bytemuck::cast_slice(&self.cell_data_prev),
             );
             self.updated_by_immune = false;
         }
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("wave encoder"),
+                label: Some("cell simulation encoder"),
             });
-        let staging_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("staging_buffer"),
-            size: (self.grid_width * self.grid_width) as u64 * std::mem::size_of::<u32>() as u64,
+        let staging_cell_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Cell staging_buffer"),
+            size: (self.grid_width * self.grid_width) as u64 * std::mem::size_of::<f32>() as u64,
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-
+        let staging_wbc_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("WBC staging_buffer"),
+            size: (self.grid_width * self.grid_width) as u64 * std::mem::size_of::<f32>() as u64,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
         {
             let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("Compute Pass"),
@@ -540,30 +540,36 @@ impl State {
             cpass.dispatch_workgroups(self.grid_width * self.grid_width, 1, 1);
         }
         encoder.copy_buffer_to_buffer(
-            &self.grid_data_buffer,
+            &self.cell_data_prev_buffer,
             0,
-            &staging_buffer,
+            &staging_cell_buffer,
             0,
-            self.grid_data_buffer.size(),
+            self.cell_data_prev_buffer.size(),
+        );
+        encoder.copy_buffer_to_buffer(
+            &self.wbc_data_prev_buffer,
+            0,
+            &staging_wbc_buffer,
+            0,
+            self.wbc_data_prev_buffer.size(),
         );
 
         self.queue.submit(Some(encoder.finish()));
-        let buffer_slice = staging_buffer.slice(..);
+        let buffer_slice = staging_cell_buffer.slice(..);
         let (sender, receiver) = flume::bounded(1);
         buffer_slice.map_async(wgpu::MapMode::Read, move |r| sender.send(r).unwrap());
         self.device.poll(wgpu::PollType::wait()).unwrap();
         let _ = receiver.recv().unwrap();
         {
             let view: wgpu::BufferView<'_> = buffer_slice.get_mapped_range();
-            let current_time_data: &[u32] = bytemuck::cast_slice(&view);
-            let mut grid_data: Vec<u32> = current_time_data.to_vec();
-            let status = status_calculate(current_time_data,);
+            let mut latest_cell_data= bytemuck::cast_slice(&view).to_vec();
+            let status = status_calculate(&latest_cell_data);
             if self.cell_params.time_stamp % 1 == 0 {  // 更新频率可以根据需要调整
                 status_log(&status,self.cell_params.time_stamp);
             }
             let cancer_percent = status.cancer_percent;
             if self.ctt_positions.len() > 0 {
-                init_ctt(&mut grid_data,self.grid_width,&self.ctt_positions,self.cell_params.ctt_effect);
+                init_ctt(&mut latest_cell_data,self.grid_width,&self.ctt_positions,self.cell_params.ctt_effect);
                 self.updated_by_immune = true;
             }
             //假设超过20%的癌细胞，免疫系统宕机
@@ -572,16 +578,26 @@ impl State {
                 if wbc_prob > status.wbc_percent {
                     wbc_prob -= status.wbc_percent;
                 }
-                init_wbc(
-                    &mut grid_data,
-                    self.grid_width,
-                    wbc_prob,
-                );
+                let wbc_buffer_slice = staging_wbc_buffer.slice(..);
+                let (sender, receiver) = flume::bounded(1);
+                wbc_buffer_slice.map_async(wgpu::MapMode::Read, move |r| sender.send(r).unwrap());
+                self.device.poll(wgpu::PollType::wait()).unwrap();
+                let _ = receiver.recv().unwrap();
+                {
+
+                    let view: wgpu::BufferView<'_> = wbc_buffer_slice.get_mapped_range();
+                    let mut latest_wbc_data= bytemuck::cast_slice(&view).to_vec();
+                    init_wbc(
+                        &mut latest_wbc_data,
+                        self.grid_width,
+                        wbc_prob,
+                    );
+                }
                 self.immune_level = (cancer_percent / 5.0) as u32 + 1;
                 self.updated_by_immune = true;
                 info_log(&format!("WBC target rate: {}", wbc_prob),self.cell_params.time_stamp);
             }
-            self.grid_data = grid_data;
+            self.cell_data_prev = latest_cell_data;
         }
     }
 

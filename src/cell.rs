@@ -34,20 +34,22 @@ pub struct GridUniforms {
     pub grid_resolution: [u32; 2],   // [width, height]
 }
 
-pub fn init_wbc(cell_grid: &mut Vec<u32>, grid_width: u32, init_wbc_rate: f32) {
+pub fn init_wbc(cell_grid: &mut Vec<f32>, grid_width: u32, increment_rate: f32) {
     let mut rng = rand::rng();
-    let total_wbc_cells = ((init_wbc_rate * (grid_width * grid_width) as f32) as u32)
-        .min(count_value(cell_grid, CellType::NormalCell as u32) as u32);
-    let mut wbc_cells_placed = 0;
+    let total_wbc_cells = (increment_rate * (grid_width * grid_width) as f32)
+        .min(cell_grid.iter().sum::<f32>());
+    let mut wbc_cells_placed = 0.0;
 
     while wbc_cells_placed < total_wbc_cells {
         let x = rng.random_range(0..grid_width);
         let y = rng.random_range(0..grid_width);
         let index = (y * grid_width + x) as usize;
-        if cell_grid[index] == 0 || cell_grid[index] == 3 {
-            cell_grid[index] = 4;
-            wbc_cells_placed += 1;
-        }
+        cell_grid[index] += 1.0;
+        wbc_cells_placed += 1.0;
+        // if cell_grid[index] == 0 || cell_grid[index] == 3 {
+        //     cell_grid[index] = 4;
+        //     wbc_cells_placed += 1;
+        // }
     }
 }
 
