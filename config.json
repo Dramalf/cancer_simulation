@@ -2,8 +2,13 @@
     "grid_width": 250,
     "num_frames": 0,
     "init_cancer_rate": 0.0001,
-    "init_cancer_grid_width": 10,
-    "init_cancer_grid_num": 1,
-    "cancer_transformation_prob": 0.01,
-    "sleep_time": 30
+    "init_cancer_grid_width": 30,
+    "init_cancer_grid_num": 3,
+    "cell_regeneration_prob": 0.01,
+    "wbc_degeneration_prob": 0.01,
+    "wbc_regeneration_prob": 0.001,
+    "cancer_transformation_prob": 0.1,
+    "sleep_time": 30,
+    "ctt_effect": 100,
+    "regen_invincible_time": 10
 }
