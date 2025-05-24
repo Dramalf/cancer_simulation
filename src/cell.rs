@@ -36,8 +36,7 @@ pub struct GridUniforms {
 
 pub fn init_wbc(cell_grid: &mut Vec<f32>, grid_width: u32, increment_rate: f32) {
     let mut rng = rand::rng();
-    let total_wbc_cells = (increment_rate * (grid_width * grid_width) as f32)
-        .min(cell_grid.iter().sum::<f32>());
+    let total_wbc_cells = increment_rate * (grid_width * grid_width) as f32;
     let mut wbc_cells_placed = 0.0;
 
     while wbc_cells_placed < total_wbc_cells {

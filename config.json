@@ -1,14 +1,14 @@
 {
-    "grid_width": 250,
+    "grid_width": 50,
     "num_frames": 0,
-    "init_cancer_rate": 0.0001,
+    "init_cancer_rate": 0.01,
     "init_cancer_grid_width": 30,
     "init_cancer_grid_num": 3,
     "cell_regeneration_prob": 0.01,
     "wbc_degeneration_prob": 0.01,
     "wbc_regeneration_prob": 0.001,
-    "cancer_transformation_prob": 0.1,
-    "sleep_time": 30,
+    "cancer_transformation_prob": 0.2,
+    "sleep_time": 50,
     "ctt_effect": 100,
     "regen_invincible_time": 10
 }

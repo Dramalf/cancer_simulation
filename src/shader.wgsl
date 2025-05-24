@@ -79,13 +79,19 @@ fn fs_main(@builtin(position) frag_coord : vec4 < f32>) -> @location(0) vec4 < f
     {
         return vec4 < f32 > (0.0, 1.0, 0.0, 1.0);
     }
-    else if(value >= WBC && value < CTT)
+    else if (value>=80u)
     {
-        return vec4 < f32 > (0.0, 0.0, 1.0, 1.0);
-    }else if(value >= CTT)
-    {
-        return vec4 < f32 > (0.5 + f32(value - cell_params.ctt_effect) / f32(cell_params.ctt_effect), 0.2, 0.4, 1.0);
-    }else{
+        let c=f32(value/255u);
+        return vec4 < f32 > (c, c, c, 1.0);
+    }
+   //else if(value >= WBC && value < CTT)
+   //{
+   //    return vec4 < f32 > (0.0, 0.0, 1.0, 1.0);
+   //}else if(value >= CTT)
+   //{
+   //    return vec4 < f32 > (0.5 + f32(value - cell_params.ctt_effect) / f32(cell_params.ctt_effect), 0.2, 0.4, 1.0);
+   //}
+    else{
         return vec4 < f32 > (0.0, 0.0, 0.0, 1.0);
     }
 }
@@ -109,16 +115,16 @@ fn get_wbc_v_prev(x : u32, y : u32) -> f32 {
     if x < view.grid_resolution.x && x >= 0u && y < view.grid_resolution.y && y >= 0u {
         return wbc_data_prev[index];
     }
-    return 0u;
+    return 0.0f;
 }
 fn get_ctt_v_prev(x : u32, y : u32) -> f32 {
     let index = x * view.grid_resolution.x + y;
     if x < view.grid_resolution.x && x >= 0u && y < view.grid_resolution.y && y >= 0u {
         return ctt_data_prev[index];
     }
-    return 0u;
+    return 0.0f;
 }
-fn count_wbc_neighbors(x : u32, y : u32) -> f32 {
+fn get_wbc_concentration(x : u32, y : u32) -> f32 {
     let neighbors : array<vec2 < u32>, 4> = array<vec2 < u32>, 4 > (
     vec2 < u32 > (x + 1u, y),
     vec2 < u32 > (x - 1u, y),
@@ -126,7 +132,7 @@ fn count_wbc_neighbors(x : u32, y : u32) -> f32 {
     vec2 < u32 > (x, y - 1u)
     );
 
-    var count : u32 = 0.0f;
+    var count : f32 = 0.0f;
     for (var j : u32 = 0u; j < 4u; j = j + 1u)
     {
         count += get_wbc_v_prev(neighbors[j].x, neighbors[j].y);
@@ -166,11 +172,11 @@ fn count_CTT_neighbors(x : u32, y : u32) -> vec2u {
     var i : u32 = 0u;
     for (i = 0u; i < 4u; i++)
     {
-        let neighbor_value = get_ctt_v_prev(neighbors[i].x, neighbors[i].y);
-        if neighbor_value >= CTT {
-            count += 1u;
-            age = max(age, neighbor_value);
-        }
+        //let neighbor_value = get_ctt_v_prev(neighbors[i].x, neighbors[i].y);
+        //if neighbor_value >= CTT {
+        //    count += 1u;
+        //    age = max(age, neighbor_value);
+        //}
     }
     return vec2u(count, age);
 
@@ -189,26 +195,26 @@ fn cancer_transformation(@builtin(global_invocation_id) global_id : vec3u)
     grid_data[global_id.x] = cell_data_prev[global_id.x];
 
     //count immune neighbors
-    let wbc_count = count_wbc_neighbors(x, y);
-    let ctt_info = count_CTT_neighbors(x, y);
-    let cct_count = ctt_info.x;
-    let cct_age = ctt_info.y;
+    let wbc_concentration = get_wbc_concentration(x, y);
+    //let ctt_info = count_CTT_neighbors(x, y);
+    //let cct_count = ctt_info.x;
+    //let cct_age = ctt_info.y;
 
     //If there is immune cell, cover the cell by immune cell
-    if wbc_data_prev[global_id.x] != 0u {
-        grid_data[global_id.x] = wbc_data_prev[global_id.x];
+    if wbc_concentration != 0.0f {
+        grid_data[global_id.x] = clamp(u32(wbc_concentration*80.0f)+80u,0u,255u);//wbc_data_prev[global_id.x];
     }
-    if ctt_data_prev[global_id.x] != 0u {
-        grid_data[global_id.x] = ctt_data_prev[global_id.x];
+    if ctt_data_prev[global_id.x] != 0.0f {
+        grid_data[global_id.x] = CTT;//ctt_data_prev[global_id.x];
     }
 
     let prev_cell = get_cell_v_prev(x, y);
-    var next_cell = 0u;
+    var next_cell = prev_cell;
     //The cancer cell will be killed by immune cell with probability 0.55
     //TODO: Make the probability configurable and related to the number of immune cells
     if prev_cell == CANCER_CELL {
-        if wbc_count >= 1.0f {
-            next_cell = select(DEAD_CELL, CANCER_CELL, pcg_2u_3f(vec2u(global_id.x, cell_params.time_stamp)).x < 0.55);
+        if wbc_concentration >= 1.0f {
+           // next_cell = select(DEAD_CELL, CANCER_CELL, pcg_2u_3f(vec2u(global_id.x, cell_params.time_stamp)).x < 0.55);
         }
     }
     //The dead cell will be regenerated with probability of cell_regeneration_prob
@@ -222,22 +228,27 @@ fn cancer_transformation(@builtin(global_invocation_id) global_id : vec3u)
         if cell_params.time_stamp % (2 * cell_params.regen_invincible_time) == 0u {
             next_cell = NORMAL_CELL;
         }
-    }
-    //Assume the wbc move to the up/down/left/right cell with probability 0.25
-    //白细胞更新
-    wbc_data_curr[global_id.x] = get_wbc_v_prev(x, y) * 0.75f + 0.25f * wbc_count;
+    }else if prev_cell == NORMAL_CELL{
+        //cancer cell transformation
 
-    //cancer cell transformation
-    if next_cell == NORMAL_CELL{
+        let cancer_count = count_cancer_neighbors(x, y);
         if cancer_count == 4u{
             next_cell = DEAD_CELL;
         }
-        else{
+        else if cancer_count >= 1u && cancer_count <= 3u{
             let not_transform_prob = pow(1.0f - cell_params.cancer_transformation_prob, f32(cancer_count));
-            next_cell = select(CANCER_CELL, NORMAL_CELL, random(x, y, cancer_count * cell_params.time_stamp) < not_transform_prob);
+            let input_seed = vec2u(global_id.x, cell_params.time_stamp);
+            let output_seed = pcg_2u_3f(input_seed);
+            next_cell = select( CANCER_CELL, NORMAL_CELL,output_seed.x < not_transform_prob);
         }
     }
 
+
+
+    cell_data_curr[global_id.x] = next_cell;
+        //Assume the wbc move to the up/down/left/right cell with probability 0.25
+    //白细胞更新
+    wbc_data_curr[global_id.x] = 0.25f * wbc_concentration;
 
     //白细胞离开
     //else if CTT > current_cell && current_cell >= WBC {
@@ -335,9 +346,79 @@ fn pseudo_random(x : u32, y : u32, tick : u32) -> f32 {
     return fract(sin(f32(hashed)) * 43758.5453);
 }
 
-fn random(x : u32, y : u32, seed : u32) -> f32 {
-    var h = x * 374761393u + y * 668265263u + seed * 144066263297769815u;
-    h = (h ^ (h >> 13u)) * 1274126177u;
-    let r = h ^ (h >> 16u);
-    return f32(r & 0xFFFFu) / 65535.0;
+fn random(x: u32, y: u32, time: u32) -> f32 {
+    var seed = x * 374761393u + y * 668265263u + time * 982451653u;
+    seed = (seed ^ (seed >> 13u)) * 1274126177u;
+    seed = seed ^ (seed >> 16u);
+    return f32(seed & 0xFFFFu) / 65535.0;
+}
+
+// Bob Jenkins' One-At-A-Time hashing algorithm (adapted from GLSL to WGSL)
+fn hash_bjoaat( x_in : u32 ) -> u32 {
+    var x = x_in;
+    x = x + ( x << 10u );
+    x = x ^ ( x >>  6u );
+    x = x + ( x <<  3u );
+    x = x ^ ( x >> 11u );
+    x = x + ( x << 15u );
+    return x;
+}
+
+// Compound versions of the hashing algorithm
+fn hash_bjoaat_vec2( v : vec2u ) -> u32 {
+    return hash_bjoaat( v.x ^ hash_bjoaat(v.y) );
+}
+
+fn hash_bjoaat_vec3( v : vec3u ) -> u32 {
+    return hash_bjoaat( v.x ^ hash_bjoaat(v.y) ^ hash_bjoaat(v.z) );
+}
+
+fn hash_bjoaat_vec4( v : vec4u ) -> u32 {
+    return hash_bjoaat( v.x ^ hash_bjoaat(v.y) ^ hash_bjoaat(v.z) ^ hash_bjoaat(v.w) );
+}
+
+// Construct a float with half-open range [0:1] using low 23 bits.
+// All zeroes yields 0.0, all ones yields the next smallest representable value below 1.0.
+fn float_construct_bjoaat( m_in : u32 ) -> f32 {
+    let ieeeMantissa = 0x007FFFFFu; // binary32 mantissa bitmask
+    let ieeeOne      = 0x3F800000u; // 1.0 in IEEE binary32
+
+    var m = m_in;
+    m = m & ieeeMantissa;          // Keep only mantissa bits (fractional part)
+    m = m | ieeeOne;               // Add fractional part to 1.0
+
+    let f = bitcast<f32>( m );     // Range [1:2] in WGSL (equivalent to uintBitsToFloat)
+    return f - 1.0;                // Range [0:1]
+}
+
+// Pseudo-random value in half-open range [0:1].
+// WGSL does not have direct floatBitsToUint for vectors, so we process components.
+// We'll provide a version for vec3f as that seems most relevant to your x,y,time input.
+
+fn random_bjoaat_f32( x : f32 ) -> f32 {
+    return float_construct_bjoaat(hash_bjoaat(bitcast<u32>(x)));
+}
+
+fn random_bjoaat_vec2f( v : vec2f ) -> f32 {
+    // Hash components individually and combine, or hash a combined u32 representation
+    let u_v = vec2u(bitcast<u32>(v.x), bitcast<u32>(v.y));
+    return float_construct_bjoaat(hash_bjoaat_vec2(u_v));
+}
+
+fn random_bjoaat_vec3f( v : vec3f ) -> f32 {
+    let u_v = vec3u(bitcast<u32>(v.x), bitcast<u32>(v.y), bitcast<u32>(v.z));
+    return float_construct_bjoaat(hash_bjoaat_vec3(u_v));
+}
+
+fn random_bjoaat_vec4f( v : vec4f ) -> f32 {
+    let u_v = vec4u(bitcast<u32>(v.x), bitcast<u32>(v.y), bitcast<u32>(v.z), bitcast<u32>(v.w));
+    return float_construct_bjoaat(hash_bjoaat_vec4(u_v));
+}
+
+// Example of how you might use it with x, y, time 
+fn get_random_f32_bjoaat(x_coord: u32, y_coord: u32, time_val: u32) -> f32 {
+    // Convert u32 coordinates to f32 for hashing, or adapt hash to take mixed types
+    // For simplicity, let's cast u32 to f32. Better might be to use their u32 bits directly.
+    let inputs = vec3f(f32(x_coord), f32(y_coord), f32(time_val));
+    return random_bjoaat_vec3f(inputs);
 }

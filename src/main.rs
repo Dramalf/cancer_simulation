@@ -28,14 +28,15 @@ struct State {
     render_pipeline: wgpu::RenderPipeline,
     cell_data_prev_buffer: wgpu::Buffer,
     cell_data_curr_buffer: wgpu::Buffer,
-    wbc_data_prev_buffer: wgpu::Buffer,
-    wbc_data_curr_buffer: wgpu::Buffer,
-    ctt_data_prev_buffer: wgpu::Buffer,
-    ctt_data_curr_buffer: wgpu::Buffer,
+    wbc_data_prev_buffer:  wgpu::Buffer,
+    wbc_data_curr_buffer:  wgpu::Buffer,
+    ctt_data_prev_buffer:  wgpu::Buffer,
+    ctt_data_curr_buffer:  wgpu::Buffer,
     uniform_buffer: wgpu::Buffer,
     cell_params: CellParams,
     cell_params_buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
+    swaped_bind_group: wgpu::BindGroup,
     grid_width: u32,
     frame_count: u32,
     max_frames: u32,
@@ -47,6 +48,7 @@ struct State {
     ctt_positions: Vec<(u32, u32)>,  // 存储靶向药位置
     mouse_position: Option<(f64, f64)>,  // 添加鼠标位置字段
     simulation_config: Config,
+    need_swap: bool,
 }
 
 impl State {
@@ -308,6 +310,48 @@ impl State {
                 },
             ],
         });
+        let swaped_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Swaped Bind Group"),
+            layout: &bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: grid_data_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: cell_data_curr_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: cell_data_prev_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wbc_data_curr_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wbc_data_prev_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: ctt_data_curr_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: ctt_data_prev_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 7,
+                    resource: uniform_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 8,
+                    resource: cell_params_buffer.as_entire_binding(),
+                },
+            ],
+        });
         // --- Render Pipeline ---
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Render Pipeline Layout"),
@@ -387,6 +431,7 @@ impl State {
             uniform_buffer,
             cell_params_buffer,
             bind_group,
+            swaped_bind_group,
             grid_width: simulation_config.grid_width,
             frame_count: 0,
             max_frames: simulation_config.num_frames,
@@ -398,6 +443,7 @@ impl State {
             ctt_positions: Vec::new(),
             mouse_position: None,
             simulation_config,
+            need_swap: false,
         }
     }
 
@@ -505,14 +551,14 @@ impl State {
             0,
             bytemuck::bytes_of(&self.cell_params),
         );
-        if self.updated_by_immune {
-            self.queue.write_buffer(
-                &self.cell_data_prev_buffer,
-                0,
-                bytemuck::cast_slice(&self.cell_data_prev),
-            );
-            self.updated_by_immune = false;
-        }
+        // if self.updated_by_immune {
+        //     self.queue.write_buffer(
+        //         &self.wbc_data_prev_buffer,
+        //         0,
+        //         bytemuck::cast_slice(&self.cell_data_prev),
+        //     );
+        //     self.updated_by_immune = false;
+        // }
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -520,7 +566,7 @@ impl State {
             });
         let staging_cell_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Cell staging_buffer"),
-            size: (self.grid_width * self.grid_width) as u64 * std::mem::size_of::<f32>() as u64,
+            size: (self.grid_width * self.grid_width) as u64 * std::mem::size_of::<u32>() as u64,
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -536,7 +582,12 @@ impl State {
                 timestamp_writes: None,
             });
             cpass.set_pipeline(&self.compute_pipeline);
-            cpass.set_bind_group(0, &self.bind_group, &[]);
+            let bind_group = if self.need_swap {
+                &self.swaped_bind_group
+            } else {
+                &self.bind_group
+            };
+            cpass.set_bind_group(0, bind_group, &[]);
             cpass.dispatch_workgroups(self.grid_width * self.grid_width, 1, 1);
         }
         encoder.copy_buffer_to_buffer(
@@ -547,11 +598,11 @@ impl State {
             self.cell_data_prev_buffer.size(),
         );
         encoder.copy_buffer_to_buffer(
-            &self.wbc_data_prev_buffer,
+            &self.wbc_data_curr_buffer,
             0,
             &staging_wbc_buffer,
             0,
-            self.wbc_data_prev_buffer.size(),
+            self.wbc_data_curr_buffer.size(),
         );
 
         self.queue.submit(Some(encoder.finish()));
@@ -592,13 +643,20 @@ impl State {
                         self.grid_width,
                         wbc_prob,
                     );
+                    self.queue.write_buffer(
+                        &self.wbc_data_curr_buffer,
+                        0,
+                        bytemuck::cast_slice(&latest_wbc_data),
+                    );
                 }
                 self.immune_level = (cancer_percent / 5.0) as u32 + 1;
-                self.updated_by_immune = true;
                 info_log(&format!("WBC target rate: {}", wbc_prob),self.cell_params.time_stamp);
             }
-            self.cell_data_prev = latest_cell_data;
         }
+        std::mem::swap(&mut self.cell_data_prev_buffer, &mut self.cell_data_curr_buffer);
+        std::mem::swap(&mut self.wbc_data_prev_buffer, &mut self.wbc_data_curr_buffer);
+        std::mem::swap(&mut self.ctt_data_prev_buffer, &mut self.ctt_data_curr_buffer);
+        self.need_swap = !self.need_swap;
     }
 
     fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
@@ -638,7 +696,6 @@ impl State {
                 occlusion_query_set: None,
                 timestamp_writes: None,
             });
-
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_bind_group(0, &self.bind_group, &[]);
             render_pass.draw(0..6, 0..1); // 画6个顶点 (两个三角形组成一个正方形)
