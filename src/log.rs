@@ -10,7 +10,7 @@ pub fn status_log(status: &Status,time_stamp: u32){
 | Regenerated │ {:<6} │ {:>6.2}%   │
 | Dead        │ {:<6} │ {:>6.2}%   │
 | CTT         │ {:<6} │ {:>6.2}%   │
------------------------------------", time_stamp, status.cancer_cells, status.cancer_percent, status.normal_cells, status.normal_percent, status.wbc_cells, status.wbc_percent, status.dead_cells, status.dead_percent, status.regenerated_cells, status.regenerated_percent,status.ctt,status.ctt_percent);
+-----------------------------------", time_stamp, status.cancer_cells, status.cancer_percent, status.normal_cells, status.normal_percent, status.wbc_cells, status.wbc_percent, status.regenerated_cells, status.regenerated_percent, status.dead_cells, status.dead_percent,status.ctt,status.ctt_percent);
     println!("{}",log_message);
 
 }

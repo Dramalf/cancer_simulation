@@ -44,8 +44,8 @@ pub fn init_wbc(cell_grid: &mut Vec<u32>, grid_width: u32, init_wbc_rate: f32) {
         let x = rng.random_range(0..grid_width);
         let y = rng.random_range(0..grid_width);
         let index = (y * grid_width + x) as usize;
-        if cell_grid[index] == 0 || cell_grid[index] == 3 {
-            cell_grid[index] = 4;
+        if cell_grid[index] <= 4 {
+            cell_grid[index] =CellType::WhiteBloodCell as u32+CellType::RegeneratedCell as u32;
             wbc_cells_placed += 1;
         }
     }

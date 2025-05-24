@@ -286,13 +286,13 @@ fn cancer_transformation(@builtin(global_invocation_id) global_id : vec3u) {
     if wbc_count>=1u{
         let input_seed = vec2u(x*y+wbc_count, cell_params.time_stamp);
         let output_seed = pcg_2u_3f(input_seed);
-        grid_data[global_id.x] = select(grid_data[global_id.x],WBC+REGENERATED_CELL, output_seed.x < 0.28);
+        grid_data[global_id.x] = select(grid_data[global_id.x],WBC+REGENERATED_CELL, output_seed.x < 0.3);
     }
     // 靶向药移动
     if cct_count >= 1u && grid_data[global_id.x] == CANCER_CELL{
         let input_seed = vec2u(x*y+cct_count, cell_params.time_stamp);
         let output_seed = pcg_2u_3f(input_seed);
-        let cct_prob = clamp(f32(cct_age) / f32(cell_params.ctt_effect)*0.25, 0.0f, 0.05f);
+        let cct_prob = clamp(f32(cct_age) / f32(cell_params.ctt_effect)*0.25, 0.0f, 0.25f);
         grid_data[global_id.x] = select(CANCER_CELL, cct_age - 1u, output_seed.x < cct_prob);
     }
 }
