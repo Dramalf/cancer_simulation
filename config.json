@@ -10,5 +10,6 @@
     "cancer_transformation_prob": 0.01,
     "sleep_time": 30,
     "ctt_effect": 100,
-    "regen_invincible_time": 10
+    "regen_invincible_time": 10,
+    "cell_lifetime": 100
 }

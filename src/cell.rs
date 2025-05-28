@@ -26,6 +26,7 @@ pub struct CellParams {
     pub time_stamp: u32,
     pub regen_invincible_time: u32,
     pub ctt_effect: u32,
+    pub default_lifetime: u32,
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -57,6 +58,7 @@ pub fn init_cell_grid(
     init_cancer_rate: f32,
     init_cancer_grid_width: u32,
     init_cancer_grid_num: u32,
+    cell_lifetime: &mut Vec<u32>,
 ) {
     let mut rng = rand::rng();
 
@@ -95,6 +97,7 @@ pub fn init_cell_grid(
             // Check if this position is not already a cancer cell
             if cell_grid[index] == 0 {
                 cell_grid[index] = 1; // Mark as cancer cell
+                cell_lifetime[index] = rng.gen_range(150..300);
                 cancer_cells_placed += 1;
             }
         }

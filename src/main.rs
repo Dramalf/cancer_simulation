@@ -42,6 +42,7 @@ struct State {
     ctt_positions: Vec<(u32, u32)>,  // 存储靶向药位置
     mouse_position: Option<(f64, f64)>,  // 添加鼠标位置字段
     simulation_config: Config,
+    cell_lifetime_buffer: wgpu::Buffer,
 }
 
 impl State {
@@ -100,14 +101,23 @@ impl State {
         let mut grid_data: Vec<u32> =
             vec![0; (simulation_config.grid_width * simulation_config.grid_width) as usize];
         let mut cell_data_prev: Vec<u32> =
+            vec![0; (simulation_config.grid_width * simulation_config.grid_width) as usize];        
+        let mut cell_lifetime: Vec<u32> = 
             vec![0; (simulation_config.grid_width * simulation_config.grid_width) as usize];
+
         init_cell_grid(
             &mut grid_data, 
             simulation_config.grid_width,
             simulation_config.init_cancer_rate,
             simulation_config.init_cancer_grid_width,
             simulation_config.init_cancer_grid_num,
+            &mut cell_lifetime,
         );
+        for i in 0..grid_data.len() {
+            if grid_data[i] <10 { // all cells
+                cell_lifetime[i] = simulation_config.cell_lifetime;
+            }
+        };
         let buffer_desc = |label| wgpu::BufferDescriptor {
             label: Some(label),
             size: (simulation_config.grid_width * simulation_config.grid_width) as u64,
@@ -139,6 +149,13 @@ impl State {
                 | wgpu::BufferUsages::COPY_SRC,
         });
 
+        let cell_lifetime_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Cell Lifetime Buffer"),
+            contents: bytemuck::cast_slice(&cell_lifetime),
+            usage: wgpu::BufferUsages::STORAGE 
+                | wgpu::BufferUsages::COPY_DST 
+                | wgpu::BufferUsages::COPY_SRC,
+        });
 
         // --- Uniforms ---
         let uniforms = GridUniforms {
@@ -153,6 +170,7 @@ impl State {
             time_stamp: 0,
             regen_invincible_time: simulation_config.regen_invincible_time,
             ctt_effect: simulation_config.ctt_effect,
+            default_lifetime: simulation_config.cell_lifetime,
         };
         let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Size Buffer"),
@@ -268,6 +286,16 @@ impl State {
                     },
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 9,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }
             ],
         });
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -310,6 +338,10 @@ impl State {
                     binding: 8,
                     resource: cell_params_buffer.as_entire_binding(),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 9,
+                    resource: cell_lifetime_buffer.as_entire_binding(),
+                }
             ],
         });
         // --- Render Pipeline ---
@@ -397,6 +429,7 @@ impl State {
             ctt_positions: Vec::new(),
             mouse_position: None,
             simulation_config,
+            cell_lifetime_buffer,
         }
     }
 

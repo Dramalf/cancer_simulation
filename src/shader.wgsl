@@ -12,6 +12,7 @@ struct CellParams{
     time_stamp : u32,
     regen_invincible_time : u32,
     ctt_effect : u32,
+    default_lifetime: u32,
 }
 
 const NORMAL_CELL = 0u;
@@ -30,6 +31,8 @@ const CTT = 8u;
 @group(0) @binding(6) var<storage, read_write> ctt_data_curr : array<u32>;
 @group(0) @binding(7) var<uniform> view : View;
 @group(0) @binding(8) var<uniform> cell_params : CellParams;
+@group(0) @binding(9) var<storage, read_write> cell_lifetime: array<u32>;
+
 @vertex
 fn vs_main(@builtin(vertex_index) vertex_index : u32) -> @builtin(position) vec4 < f32> {
     //生成覆盖整个裁剪空间的两个三角形 (形成一个正方形)
@@ -74,7 +77,7 @@ fn fs_main(@builtin(position) frag_coord : vec4 < f32>) -> @location(0) vec4 < f
         return vec4 < f32 > (1.0, 0.0, 0.0, 1.0);
     } else if (value == DEAD_CELL)
     {
-        return vec4 < f32 > (0.0, 0.0, 0.0, 1.0);
+        return vec4 < f32 > (1.0, 1.0, 1.0, 1.0);
     }else if (value == REGENERATED_CELL)
     {
         return vec4 < f32 > (0.0, 1.0, 0.0, 1.0);
@@ -274,12 +277,27 @@ fn cancer_transformation(@builtin(global_invocation_id) global_id : vec3u) {
         if cancer_count >= 1u && cancer_count <= 3u {
             let input_seed = vec2u(global_id.x, cell_params.time_stamp + cancer_count);
             let output_seed = pcg_2u_3f(input_seed);
-            grid_data[global_id.x] = select(CANCER_CELL, NORMAL_CELL, output_seed.x < pow(1.0f - cell_params.cancer_transformation_prob, f32(cancer_count)));
-            if grid_data[global_id.x] == CANCER_CELL && cct_count >= 1u {
-                grid_data[global_id.x] = select(CANCER_CELL, cct_age, pseudo_random(x, y, cell_params.time_stamp) < 0.05f);
+            let will_be_cancer = output_seed.x < pow(1.0 - cell_params.cancer_transformation_prob, f32(cancer_count));
+            if will_be_cancer {
+                grid_data[global_id.x] = CANCER_CELL;
+                cell_lifetime[global_id.x] = cell_params.default_lifetime; 
+                // 如果有靶向药影响，考虑替换为CTT效果
+                if cct_count >= 1u {
+                    let use_ctt = pseudo_random(x, y, cell_params.time_stamp) < 0.05f;
+                    if use_ctt {
+                        grid_data[global_id.x] = cct_age;
+                    }
+                }
+            } else {
+                grid_data[global_id.x] = NORMAL_CELL;
             }
+            // grid_data[global_id.x] = select(CANCER_CELL, NORMAL_CELL, output_seed.x < pow(1.0f - cell_params.cancer_transformation_prob, f32(cancer_count)));
+            // if grid_data[global_id.x] == CANCER_CELL && cct_count >= 1u {
+            //     grid_data[global_id.x] = select(CANCER_CELL, cct_age, pseudo_random(x, y, cell_params.time_stamp) < 0.05f);
+            // }
         } else if cancer_count == 4u {
             grid_data[global_id.x] = 2u;
+            cell_lifetime[global_id.x] = cell_params.default_lifetime;
         }
     }
     // 白细胞移动
@@ -294,6 +312,13 @@ fn cancer_transformation(@builtin(global_invocation_id) global_id : vec3u) {
         let output_seed = pcg_2u_3f(input_seed);
         let cct_prob = clamp(f32(cct_age) / f32(cell_params.ctt_effect)*0.25, 0.0f, 0.25f);
         grid_data[global_id.x] = select(CANCER_CELL, cct_age - 1u, output_seed.x < cct_prob);
+    }
+    // 细胞寿命
+    let lifetime = cell_lifetime[global_id.x];
+    if (lifetime > 0u) {
+        cell_lifetime[global_id.x] = lifetime - 1u;
+    } else {
+        grid_data[global_id.x] = DEAD_CELL;
     }
 }
 

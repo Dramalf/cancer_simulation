@@ -15,6 +15,7 @@ pub struct Config {
     pub sleep_time: u32,
     pub ctt_effect: u32,
     pub regen_invincible_time: u32,
+    pub cell_lifetime: u32
 }
 
 pub fn load_config() -> Config {
