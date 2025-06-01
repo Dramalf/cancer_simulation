@@ -17,8 +17,8 @@ mod utils;
 use cell::{CellParams, GridUniforms, init_cell_grid,random_init_cancer, init_ctt, init_wbc,progressive_multi_jittered_sampling};
 mod config;
 use config::{Config, load_config};
-mod save_cvs;
-use save_cvs::SimulationHistory;
+mod save_csv;
+use save_csv::SimulationHistory;
 
 struct State {
     surface: wgpu::Surface<'static>,
