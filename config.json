@@ -1,5 +1,5 @@
 {
-    "grid_width": 250,
+    "grid_width": 200,
     "num_frames": 0,
     "init_cancer_rate": 0.0003,
     "init_cancer_grid_width": 30,
@@ -10,5 +10,6 @@
     "cancer_transformation_prob": 0.01,
     "sleep_time": 30,
     "ctt_effect": 100,
-    "regen_invincible_time": 10
+    "regen_invincible_time": 10,
+    "init_strategy": "progressive"
 }
