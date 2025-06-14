@@ -18,6 +18,8 @@ pub struct SimulationHistory {
     normal_percents: Vec<f32>,
     // 再生细胞比例
     regen_percents: Vec<f32>,
+    // CTT浓度比例
+    ctt_percents: Vec<f32>,
 }
 
 impl SimulationHistory {
@@ -33,6 +35,7 @@ impl SimulationHistory {
         self.dead_percents.push(status.dead_percent);
         self.normal_percents.push(status.normal_percent);
         self.regen_percents.push(status.regenerated_percent);
+        self.ctt_percents.push(status.ctt_percent);
     }
 
     // 导出为CSV文件
@@ -48,19 +51,20 @@ impl SimulationHistory {
         let mut file = File::create(filename)?;
         
         // 写入CSV头
-        writeln!(file, "timestamp,cancer_percent,wbc_percent,dead_percent,normal_percent,regen_percent")?;
+        writeln!(file, "timestamp,cancer_percent,wbc_percent,dead_percent,normal_percent,regen_percent,ctt_percent")?;
         
         // 写入数据
         for i in 0..self.timestamps.len() {
             writeln!(
                 file,
-                "{},{},{},{},{},{}",
+                "{},{},{},{},{},{},{}",
                 self.timestamps[i],
                 self.cancer_percents[i],
                 self.wbc_percents[i],
                 self.dead_percents[i],
                 self.normal_percents[i],
-                self.regen_percents[i]
+                self.regen_percents[i],
+                self.ctt_percents[i]
             )?;
         }
         

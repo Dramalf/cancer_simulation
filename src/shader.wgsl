@@ -21,15 +21,14 @@ const REGENERATED_CELL = 3u;
 const WBC = 4u;
 const CTT = 8u;
 
-@group(0) @binding(0) var<storage, read_write> grid_data : array<u32>;
-@group(0) @binding(1) var<storage, read_write> cell_data_prev : array<u32>;
-@group(0) @binding(2) var<storage, read_write> cell_data_curr : array<u32>;
-@group(0) @binding(3) var<storage, read_write> wbc_data_prev : array<f32>;
-@group(0) @binding(4) var<storage, read_write> wbc_data_curr : array<f32>;
-@group(0) @binding(5) var<storage, read_write> ctt_data_prev : array<f32>;
-@group(0) @binding(6) var<storage, read_write> ctt_data_curr : array<f32>;
-@group(0) @binding(7) var<uniform> view : View;
-@group(0) @binding(8) var<uniform> cell_params : CellParams;
+@group(0) @binding(0) var<storage, read_write> cell_data_prev : array<u32>;
+@group(0) @binding(1) var<storage, read_write> cell_data_curr : array<u32>;
+@group(0) @binding(2) var<storage, read_write> wbc_data_prev : array<f32>;
+@group(0) @binding(3) var<storage, read_write> wbc_data_curr : array<f32>;
+@group(0) @binding(4) var<storage, read_write> ctt_data_prev : array<f32>;
+@group(0) @binding(5) var<storage, read_write> ctt_data_curr : array<f32>;
+@group(0) @binding(6) var<uniform> view : View;
+@group(0) @binding(7) var<uniform> cell_params : CellParams;
 @vertex
 fn vs_main(@builtin(vertex_index) vertex_index : u32) -> @builtin(position) vec4 < f32> {
     //生成覆盖整个裁剪空间的两个三角形 (形成一个正方形)
@@ -65,7 +64,15 @@ fn fs_main(@builtin(position) frag_coord : vec4 < f32>) -> @location(0) vec4 < f
     }
 
     let index = grid_y * view.grid_resolution.x + grid_x;
-    let value = grid_data[index];
+    let value = cell_data_prev[index];
+    
+    // 检查CTT浓度并显示紫色
+    let ctt_value = ctt_data_prev[index];
+    if (ctt_value > 0.01f && value == CANCER_CELL) {
+        let intensity = clamp(ctt_value / 10.0f, 0.2f, 1.0f);
+        return vec4 < f32 > (intensity * 0.8, 0.2, intensity, 1.0); // 紫色
+    }
+    
     if (value == NORMAL_CELL)
     {
         return vec4 < f32 > (0.93, 0.8, 0.69, 1.0);
@@ -82,27 +89,14 @@ fn fs_main(@builtin(position) frag_coord : vec4 < f32>) -> @location(0) vec4 < f
     else if (value >= 80u)
     {
         let c = f32(value) / 255.0f;
-        return vec4 < f32 > (1.0, c, c, 1.0);
+        return vec4 < f32 > (0.0, 0.0, c, 1.0); // 蓝色显示WBC
     }
-    //else if(value >= WBC && value < CTT)
-    //{
-    //return vec4 < f32 > (0.0, 0.0, 1.0, 1.0);
-    //}else if(value >= CTT)
-    //{
-    //return vec4 < f32 > (0.5 + f32(value - cell_params.ctt_effect) / f32(cell_params.ctt_effect), 0.2, 0.4, 1.0);
-    //}
     else{
         return vec4 < f32 > (0.0, 0.0, 0.0, 1.0);
     }
 }
 
-fn get_v(x : u32, y : u32) -> u32 {
-    let index = x * view.grid_resolution.x + y;
-    if x < view.grid_resolution.x && x >= 0u && y < view.grid_resolution.y && y >= 0u {
-        return grid_data[index];
-    }
-    return 0u;
-}
+
 fn get_cell_v_prev(x : u32, y : u32) -> u32 {
     let index = x * view.grid_resolution.x + y;
     if x < view.grid_resolution.x && x >= 0u && y < view.grid_resolution.y && y >= 0u {
@@ -136,6 +130,22 @@ fn get_wbc_concentration(x : u32, y : u32) -> f32 {
     for (var j : u32 = 0u; j < 4u; j = j + 1u)
     {
         count += get_wbc_v_prev(neighbors[j].x, neighbors[j].y);
+    }
+    return count;
+}
+
+fn get_ctt_concentration(x : u32, y : u32) -> f32 {
+    let neighbors : array<vec2 < u32>, 4> = array<vec2 < u32>, 4 > (
+    vec2 < u32 > (x + 1u, y),
+    vec2 < u32 > (x - 1u, y),
+    vec2 < u32 > (x, y + 1u),
+    vec2 < u32 > (x, y - 1u)
+    );
+
+    var count : f32 = 0.0f;
+    for (var j : u32 = 0u; j < 4u; j = j + 1u)
+    {
+        count += get_ctt_v_prev(neighbors[j].x, neighbors[j].y);
     }
     return count;
 }
@@ -191,11 +201,10 @@ fn cancer_transformation(@builtin(global_invocation_id) global_id : vec3u)
     let x = global_id.x / view.grid_resolution.x;
     let y = global_id.x % view.grid_resolution.y;
 
-    //draw last frame
-    grid_data[global_id.x] = cell_data_prev[global_id.x];
 
     //count immune neighbors
     let wbc_concentration = get_wbc_concentration(x, y);
+    let ctt_concentration = get_ctt_concentration(x, y);
     //let ctt_info = count_CTT_neighbors(x, y);
     //let cct_count = ctt_info.x;
     //let cct_age = ctt_info.y;
@@ -204,15 +213,7 @@ fn cancer_transformation(@builtin(global_invocation_id) global_id : vec3u)
 
     let prev_cell = get_cell_v_prev(x, y);
     var next_cell = prev_cell;
-    //If there is immune cell, cover the cell by immune cell
-    if wbc_concentration >= 0.01 && prev_cell == CANCER_CELL{
-        grid_data[global_id.x] = clamp(u32(wbc_concentration * 80.0f) + 80u, 0u, 255u);
-    }
-    if ctt_data_prev[global_id.x] != 0.0f {
-        grid_data[global_id.x] = CTT;
-    }
-    //The cancer cell will be killed by immune cell with probability 0.55
-    //TODO: Make the probability configurable and related to the number of immune cells
+
     if prev_cell == CANCER_CELL {
         if wbc_concentration> 0.01{
             let input_seed = vec2u(global_id.x, cell_params.time_stamp);
@@ -247,50 +248,21 @@ fn cancer_transformation(@builtin(global_invocation_id) global_id : vec3u)
         }
     }
 
+    // CTT对癌细胞的杀伤效果 (在其他逻辑之前处理)
+    if ctt_data_prev[global_id.x] > 0.01f && prev_cell == CANCER_CELL {
+        let input_seed = vec2u(global_id.x + 1000u, cell_params.time_stamp);
+        let output_seed = pcg_2u_3f(input_seed);
+        let ctt_effect = effect_hill(ctt_data_prev[global_id.x], 2.0, 1.5, 0.6);
+        next_cell = select(DEAD_CELL, CANCER_CELL, output_seed.x > ctt_effect);
+    }
+
     cell_data_curr[global_id.x] = next_cell;
-        //Assume the wbc move to the up/down/left/right cell with probability 0.25
-    //白细胞更新
+    
+    // 白细胞扩散更新
     wbc_data_curr[global_id.x] = 0.9f * 0.25f * wbc_concentration;
-
-    //白细胞离开
-    //else if CTT > current_cell && current_cell >= WBC {
-    //let prev_cell = current_cell % WBC;
-    //let input_seed = vec2u(cell_params.time_stamp, current_cell);
-    //let output_seed = pcg_2u_3f(input_seed);
-    //grid_data[global_id.x] = select(prev_cell, current_cell, output_seed.x < 0.25);
-    //}
-    ////靶向药扩散/药效减弱
-    //else if current_cell >= CTT {
-    //if current_cell == CTT {
-    //grid_data[global_id.x] = REGENERATED_CELL;
-    //}
-    //else{
-    //grid_data[global_id.x] = current_cell - 1u;
-    //}
-    //}
-
-    //癌细胞扩散
-    //if grid_data[global_id.x] == NORMAL_CELL {
-    //let cancer_count = count_cancer_neighbors(x, y);
-    //if cancer_count >= 1u && cancer_count <= 3u {
-    //let input_seed = vec2u(global_id.x, cell_params.time_stamp + cancer_count);
-    //let output_seed = pcg_2u_3f(input_seed);
-    //grid_data[global_id.x] = select(CANCER_CELL, NORMAL_CELL, output_seed.x < pow(1.0f - cell_params.cancer_transformation_prob, f32(cancer_count)));
-    //if grid_data[global_id.x] == CANCER_CELL && cct_count >= 1u {
-    //grid_data[global_id.x] = select(CANCER_CELL, cct_age, pseudo_random(x, y, cell_params.time_stamp) < 0.05f);
-    //}
-    //} else if cancer_count == 4u {
-    //grid_data[global_id.x] = 2u;
-    //}
-    //}
-
-    //靶向药移动
-    //if cct_count >= 1u && grid_data[global_id.x] == CANCER_CELL{
-    //let input_seed = vec2u(x * y+cct_count, cell_params.time_stamp);
-    //let output_seed = pcg_2u_3f(input_seed);
-    //let cct_prob = clamp(f32(cct_age) / f32(cell_params.ctt_effect) * 0.25, 0.0f, 0.05f);
-    //grid_data[global_id.x] = select(CANCER_CELL, cct_age - 1u, output_seed.x < cct_prob);
-    //}
+    
+    // CTT扩散逻辑
+    ctt_data_curr[global_id.x] = 0.9f * 0.25f * ctt_concentration;
 }
 
 

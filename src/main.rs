@@ -1,4 +1,4 @@
-use console::{Term, style};
+use console::style;
 use dialoguer::{Select, theme::ColorfulTheme};
 use utils::effect_hill;
 use std::{iter, time::Duration};
@@ -14,7 +14,7 @@ mod status;
 use status::status_calculate;
 mod cell;
 mod utils;
-use cell::{CellParams, GridUniforms, init_cell_grid,random_init_cancer, init_ctt, init_wbc,progressive_multi_jittered_sampling};
+use cell::{CellParams, GridUniforms, init_cell_grid,random_init_cancer, init_wbc,progressive_multi_jittered_sampling};
 mod config;
 use config::{Config, load_config};
 mod save_csv;
@@ -26,10 +26,9 @@ struct State {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     size: winit::dpi::PhysicalSize<u32>,
-    window: &'static Window, // 使用 'static lifetime
+    window: &'static Window, // Use 'static lifetime
     compute_pipeline: wgpu::ComputePipeline,
     render_pipeline: wgpu::RenderPipeline,
-    grid_data_buffer: wgpu::Buffer,
     cell_data_prev_buffer: wgpu::Buffer,
     cell_data_curr_buffer: wgpu::Buffer,
     wbc_data_prev_buffer: wgpu::Buffer,
@@ -48,9 +47,9 @@ struct State {
     cell_data_prev: Vec<u32>,
     updated_by_immune: bool,
     paused: bool,
-    waiting_for_ctt_input: bool,        // 是否等待靶向药输入
-    ctt_positions: Vec<(u32, u32)>,     // 存储靶向药位置
-    mouse_position: Option<(f64, f64)>, // 添加鼠标位置字段
+    waiting_for_ctt_input: bool,        // Whether waiting for CTT input
+    ctt_positions: Vec<(u32, u32)>,     // Store CTT positions
+    mouse_position: Option<(f64, f64)>, // Mouse position field
     simulation_config: Config,
     need_swap: bool,
     debug_mode: bool,
@@ -93,7 +92,7 @@ impl State {
             .formats
             .iter()
             .copied()
-            .find(|f| f.is_srgb()) // 通常选择 SRGB 格式
+            .find(|f| f.is_srgb()) // Usually choose SRGB format
             .unwrap_or(surface_caps.formats[0]);
 
         let config = wgpu::SurfaceConfiguration {
@@ -101,14 +100,14 @@ impl State {
             format: surface_format,
             width: size.width,
             height: size.height,
-            present_mode: surface_caps.present_modes[0], // 通常是 Fifo
+            present_mode: surface_caps.present_modes[0], // Usually Fifo
             alpha_mode: surface_caps.alpha_modes[0],
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
         };
         surface.configure(&device, &config);
 
-        // --- 网格数据 ---
+        // --- Grid data ---
         let mut cell_data_prev: Vec<u32> =
             vec![0; (simulation_config.grid_width * simulation_config.grid_width) as usize];
         if simulation_config.init_strategy == "random" {
@@ -134,10 +133,6 @@ impl State {
         };
         let grid_size = (simulation_config.grid_width * simulation_config.grid_width) as u64;
 
-        let grid_data_buffer = device.create_buffer(&buffer_desc(
-            "Grid Data Buffer",
-            grid_size * std::mem::size_of::<u32>() as u64,
-        ));
         let cell_data_curr_buffer = device.create_buffer(&buffer_desc(
             "Cell Data Curr Buffer",
             grid_size * std::mem::size_of::<u32>() as u64,
@@ -158,6 +153,13 @@ impl State {
             "Ctt Data Curr Buffer",
             grid_size * std::mem::size_of::<f32>() as u64,
         ));
+        
+        // Initialize CTT and WBC buffers to 0
+        let zero_data: Vec<f32> = vec![0.0; grid_size as usize];
+        queue.write_buffer(&ctt_data_prev_buffer, 0, bytemuck::cast_slice(&zero_data));
+        queue.write_buffer(&ctt_data_curr_buffer, 0, bytemuck::cast_slice(&zero_data));
+        queue.write_buffer(&wbc_data_prev_buffer, 0, bytemuck::cast_slice(&zero_data));
+        queue.write_buffer(&wbc_data_curr_buffer, 0, bytemuck::cast_slice(&zero_data));
 
         let cell_data_prev_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Cell Data Prev Buffer"),
@@ -192,20 +194,19 @@ impl State {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        // --- 着色器 ---
+        // --- Shaders ---
         let shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
         });
 
-        // --- Bind Group Layout 和 Bind Group ---
+        // --- Bind Group Layout and Bind Group ---
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Bind Group Layout"),
             entries: &[
                 wgpu::BindGroupLayoutEntry {
-                    // grid_data
                     binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE, // 或 COMPUTE | FRAGMENT 如果也用于计算
+                    visibility: wgpu::ShaderStages::FRAGMENT |wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Storage { read_only: false },
                         has_dynamic_offset: false,
@@ -215,7 +216,7 @@ impl State {
                 },
                 wgpu::BindGroupLayoutEntry {
                     binding: 1,
-                    visibility: wgpu::ShaderStages::COMPUTE,
+                    visibility:wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Storage { read_only: false },
                         has_dynamic_offset: false,
@@ -225,7 +226,7 @@ impl State {
                 },
                 wgpu::BindGroupLayoutEntry {
                     binding: 2,
-                    visibility: wgpu::ShaderStages::COMPUTE,
+                    visibility: wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Storage { read_only: false },
                         has_dynamic_offset: false,
@@ -235,7 +236,7 @@ impl State {
                 },
                 wgpu::BindGroupLayoutEntry {
                     binding: 3,
-                    visibility: wgpu::ShaderStages::COMPUTE,
+                    visibility: wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Storage { read_only: false },
                         has_dynamic_offset: false,
@@ -245,7 +246,7 @@ impl State {
                 },
                 wgpu::BindGroupLayoutEntry {
                     binding: 4,
-                    visibility: wgpu::ShaderStages::COMPUTE,
+                    visibility: wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Storage { read_only: false },
                         has_dynamic_offset: false,
@@ -255,17 +256,7 @@ impl State {
                 },
                 wgpu::BindGroupLayoutEntry {
                     binding: 5,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 6,
-                    visibility: wgpu::ShaderStages::COMPUTE,
+                    visibility: wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Storage { read_only: false },
                         has_dynamic_offset: false,
@@ -275,7 +266,7 @@ impl State {
                 },
                 wgpu::BindGroupLayoutEntry {
                     // uniforms
-                    binding: 7,
+                    binding: 6,
                     visibility: wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
@@ -286,7 +277,7 @@ impl State {
                 },
                 wgpu::BindGroupLayoutEntry {
                     // uniforms
-                    binding: 8,
+                    binding: 7,
                     visibility: wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
@@ -303,38 +294,34 @@ impl State {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: grid_data_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
                     resource: cell_data_prev_buffer.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 2,
+                    binding: 1,
                     resource: cell_data_curr_buffer.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 3,
+                    binding: 2,
                     resource: wbc_data_prev_buffer.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 4,
+                    binding: 3,
                     resource: wbc_data_curr_buffer.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 5,
+                    binding: 4,
                     resource: ctt_data_prev_buffer.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 6,
+                    binding: 5,
                     resource: ctt_data_curr_buffer.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 7,
+                    binding: 6,
                     resource: uniform_buffer.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 8,
+                    binding: 7,
                     resource: cell_params_buffer.as_entire_binding(),
                 },
             ],
@@ -345,38 +332,34 @@ impl State {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: grid_data_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
                     resource: cell_data_curr_buffer.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 2,
+                    binding: 1,
                     resource: cell_data_prev_buffer.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 3,
+                    binding: 2,
                     resource: wbc_data_curr_buffer.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 4,
+                    binding: 3,
                     resource: wbc_data_prev_buffer.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 5,
+                    binding: 4,
                     resource: ctt_data_curr_buffer.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 6,
+                    binding: 5,
                     resource: ctt_data_prev_buffer.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 7,
+                    binding: 6,
                     resource: uniform_buffer.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 8,
+                    binding: 7,
                     resource: cell_params_buffer.as_entire_binding(),
                 },
             ],
@@ -418,8 +401,8 @@ impl State {
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,
                 strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,  // 逆时针为正面
-                cull_mode: Some(wgpu::Face::Back), // 剔除背面
+                            front_face: wgpu::FrontFace::Ccw,  // Counter-clockwise as front face
+            cull_mode: Some(wgpu::Face::Back), // Cull back faces
                 polygon_mode: wgpu::PolygonMode::Fill,
                 unclipped_depth: false,
                 conservative: false,
@@ -451,7 +434,6 @@ impl State {
             size,
             render_pipeline,
             compute_pipeline,
-            grid_data_buffer,
             cell_data_prev_buffer,
             cell_data_curr_buffer,
             wbc_data_prev_buffer,
@@ -491,7 +473,7 @@ impl State {
             self.config.height = new_size.height;
             self.surface.configure(&self.device, &self.config);
 
-            // 更新 uniform buffer 中的 output_resolution
+            // Update output_resolution in uniform buffer
             let uniforms = GridUniforms {
                 output_resolution: [new_size.width, new_size.height],
                 grid_resolution: [self.grid_width, self.grid_width],
@@ -590,7 +572,7 @@ impl State {
                     }
                     true
                 } else {
-                    // 切换暂停状态
+                    // Toggle pause state
                     self.paused = !self.paused;
                     if self.paused {
                         self.show_menu();
@@ -615,11 +597,12 @@ impl State {
                         "{}",
                         style(format!("CTT position list: {:?}", self.ctt_positions)).yellow()
                     );
-                    self.show_menu(); // 返回菜单
+                    self.paused = false; // Continue simulation instead of returning to menu
+                    self.window.request_redraw();
                     true
                 } else if self.debug_mode {
                     self.debug_mode = false;
-                    self.show_menu(); // 返回菜单
+                    self.show_menu(); // Return to menu
                     true
                 } else {
                     false
@@ -636,14 +619,7 @@ impl State {
             0,
             bytemuck::bytes_of(&self.cell_params),
         );
-        // if self.updated_by_immune {
-        //     self.queue.write_buffer(
-        //         &self.wbc_data_prev_buffer,
-        //         0,
-        //         bytemuck::cast_slice(&self.cell_data_prev),
-        //     );
-        //     self.updated_by_immune = false;
-        // }
+
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -657,6 +633,12 @@ impl State {
         });
         let staging_wbc_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("WBC staging_buffer"),
+            size: (self.grid_width * self.grid_width) as u64 * std::mem::size_of::<f32>() as u64,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let staging_ctt_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("CTT staging_buffer"),
             size: (self.grid_width * self.grid_width) as u64 * std::mem::size_of::<f32>() as u64,
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
@@ -689,6 +671,13 @@ impl State {
             0,
             self.wbc_data_curr_buffer.size(),
         );
+        encoder.copy_buffer_to_buffer(
+            &self.ctt_data_curr_buffer,
+            0,
+            &staging_ctt_buffer,
+            0,
+            self.ctt_data_curr_buffer.size(),
+        );
 
         self.queue.submit(Some(encoder.finish()));
         let buffer_slice = staging_cell_buffer.slice(..);
@@ -701,32 +690,47 @@ impl State {
         wbc_buffer_slice.map_async(wgpu::MapMode::Read, move |r| sender.send(r).unwrap());
         self.device.poll(wgpu::PollType::wait()).unwrap();
         let _ = receiver.recv().unwrap();
+        let ctt_buffer_slice = staging_ctt_buffer.slice(..);
+        let (sender, receiver) = flume::bounded(1);
+        ctt_buffer_slice.map_async(wgpu::MapMode::Read, move |r| sender.send(r).unwrap());
+        self.device.poll(wgpu::PollType::wait()).unwrap();
+        let _ = receiver.recv().unwrap();
         {
             let view: wgpu::BufferView<'_> = buffer_slice.get_mapped_range();
-            let mut latest_cell_data = bytemuck::cast_slice(&view).to_vec();
+            let latest_cell_data = bytemuck::cast_slice(&view).to_vec();
             let wbc_view: wgpu::BufferView<'_> = wbc_buffer_slice.get_mapped_range();
             let mut latest_wbc_data = bytemuck::cast_slice(&wbc_view).to_vec();
-            let status = status_calculate(&latest_cell_data, &latest_wbc_data);
+            let ctt_view: wgpu::BufferView<'_> = ctt_buffer_slice.get_mapped_range();
+            let latest_ctt_data = bytemuck::cast_slice(&ctt_view).to_vec();
+            let status = status_calculate(&latest_cell_data, &latest_wbc_data, &latest_ctt_data);
             
-            // 添加到历史记录
+            // Add to history
             
             if self.cell_params.time_stamp % 1 == 0 {
-                // 更新频率可以根据需要调整
+                // Update frequency can be adjusted as needed
                 self.simulation_history.add_data_point(self.cell_params.time_stamp, &status);
 
                 status_log(&status, self.cell_params.time_stamp);
             }
             let cancer_percent = status.cancer_percent;
             if self.ctt_positions.len() > 0 {
-                init_ctt(
-                    &mut latest_cell_data,
-                    self.grid_width,
-                    &self.ctt_positions,
-                    self.cell_params.ctt_effect,
+                // Create CTT data and write to buffer
+                let mut ctt_data: Vec<f32> = vec![0.0; (self.grid_width * self.grid_width) as usize];
+                for (x, y) in self.ctt_positions.iter() {
+                    let index = (y * self.grid_width + x) as usize;
+                    if index < ctt_data.len() {
+                        ctt_data[index] = self.cell_params.ctt_effect as f32;
+                    }
+                }
+                self.queue.write_buffer(
+                    &self.ctt_data_curr_buffer,
+                    0,
+                    bytemuck::cast_slice(&ctt_data),
                 );
-                self.updated_by_immune = true;
+                // Clear position list to avoid duplicate additions
+                self.ctt_positions.clear();
             }
-            //假设超过20%的癌细胞，免疫系统宕机
+            // Assume immune system crashes when cancer cells exceed 20%
             println!("cancer_percent: {}", cancer_percent);
             println!("immune_level: {}", self.immune_level);
             if false &&cancer_percent < 20.0
@@ -815,16 +819,8 @@ impl State {
     }
 
     fn read_cell_data_at_position(&mut self, grid_x: u32, grid_y: u32) {
-        // 计算一维索引
+        // Calculate 1D index
         let index = (grid_y * self.grid_width + grid_x) as usize;
-
-        // 创建临时缓冲区用于读取
-        let staging_viewer_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Debug staging buffer"),
-            size: (self.grid_width * self.grid_width) as u64 * std::mem::size_of::<u32>() as u64,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
 
         let staging_cell_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Debug staging buffer"),
@@ -847,21 +843,13 @@ impl State {
             mapped_at_creation: false,
         });
 
-        // 创建命令编码器来从GPU读取数据
+        // Create command encoder to read data from GPU
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("Debug read encoder"),
             });
 
-        // 从GPU缓冲区复制数据到临时缓冲区
-        encoder.copy_buffer_to_buffer(
-            &self.grid_data_buffer,
-            0,
-            &staging_viewer_buffer,
-            0,
-            self.grid_data_buffer.size(),
-        );
 
         encoder.copy_buffer_to_buffer(
             &self.cell_data_prev_buffer,
@@ -887,23 +875,17 @@ impl State {
             self.ctt_data_prev_buffer.size(),
         );
 
-        // 提交命令
+        // Submit commands
         self.queue.submit(Some(encoder.finish()));
 
-        let viewer_buffer_slice = staging_viewer_buffer.slice(..);
-        let (sender, receiver) = flume::bounded(1);
-        viewer_buffer_slice.map_async(wgpu::MapMode::Read, move |r| sender.send(r).unwrap());
-        self.device.poll(wgpu::PollType::wait()).unwrap();
-        let _ = receiver.recv().unwrap();
-
-        // 读取单元格数据
+        // Read cell data
         let cell_buffer_slice = staging_cell_buffer.slice(..);
         let (sender, receiver) = flume::bounded(1);
         cell_buffer_slice.map_async(wgpu::MapMode::Read, move |r| sender.send(r).unwrap());
         self.device.poll(wgpu::PollType::wait()).unwrap();
         let _ = receiver.recv().unwrap();
 
-        // 读取WBC数据
+        // Read WBC data
         let wbc_buffer_slice = staging_wbc_buffer.slice(..);
         let (sender, receiver) = flume::bounded(1);
         wbc_buffer_slice.map_async(wgpu::MapMode::Read, move |r| sender.send(r).unwrap());
@@ -919,9 +901,6 @@ impl State {
 
         // 解析并显示数据
         {
-            let view: wgpu::BufferView<'_> = viewer_buffer_slice.get_mapped_range();
-            let viewer_data: &[u32] = bytemuck::cast_slice(&view);
-
             let cell_view = cell_buffer_slice.get_mapped_range();
             let cell_data: &[u32] = bytemuck::cast_slice(&cell_view);
 
@@ -934,7 +913,6 @@ impl State {
             // 确保索引在有效范围内
             if index < cell_data.len() {
                 // 解析单元格类型和状态
-                let viewer_value = viewer_data[index];
                 let cell_value = cell_data[index];
                 let cell_type = cell_value & 0xFF; // 假设类型存储在低8位
                 let cell_state = (cell_value >> 8) & 0xFF; // 假设状态存储在接下来的8位
@@ -948,7 +926,6 @@ impl State {
                 };
 
                 println!("\n{}", style("--- DEBUG INFO ---").yellow().bold());
-                println!("Viewer Value: {}", viewer_value);
                 println!("Position: ({}, {})", grid_x, grid_y);
                 println!("Index: {}", index);
                 println!("Cell Value: {}", cell_value);
@@ -971,7 +948,6 @@ impl State {
         }
 
         // 解除映射，丢弃临时缓冲区
-        drop(staging_viewer_buffer);
         drop(staging_cell_buffer);
         drop(staging_wbc_buffer);
         drop(staging_ctt_buffer);
